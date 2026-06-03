@@ -3,7 +3,7 @@ Title: Automatic Epidemiological Report Generator
 Version: 0.1.0
 Authors@R: 
     person("Luchesio", role = c("aut", "cre"),
-           email = "your@email.com",
+           email = "contact.digivaultstore@gmail.com",
            comment = c(ORCID = ""))
 Description: 
     Automatically generates epidemiological surveillance reports (weekly, monthly)
@@ -13,24 +13,19 @@ Description:
     countries, with compatibility with DHIS2 data exports.
 License: MIT + file LICENSE
 Encoding: UTF-8
+Depends: R (>= 4.1.0)
 Roxygen: list(markdown = TRUE)
 Imports:
     readr (>= 2.1.0),
     readxl (>= 1.4.0),
     dplyr (>= 1.1.0),
-    tidyr (>= 1.3.0),
     ggplot2 (>= 3.4.0),
-    officer (>= 0.6.0),
-    flextable (>= 0.9.0),
     rmarkdown (>= 2.20),
     lubridate (>= 1.9.0),
     glue (>= 1.6.0),
     cli (>= 3.6.0)
 Suggests:
     testthat (>= 3.0.0),
-    knitr,
-    covr
-VignetteBuilder: knitr
-URL: https://github.com/yourusername/epiforge
-BugReports: https://github.com/yourusername/epiforge/issues
+URL: https://github.com/Luchesio-epi/epiforge
+BugReports: https://github.com/Luchesio-epi/epiforge/issues
 Config/roxygen2/version: 8.0.0

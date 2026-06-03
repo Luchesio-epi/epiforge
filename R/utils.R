@@ -27,3 +27,10 @@ format_date_range <- function(dates) {
   dates <- dates[!is.na(dates)]
   glue::glue("{min(dates)} to {max(dates)}")
 }
+
+# Déclaration variables globales pour R CMD check
+utils::globalVariables(c(
+  "date", "disease", "location", "cases", "deaths",
+  "period_date", "period_label", "total_cases", "total_deaths",
+  "cfr_pct", "week_date", "incidence_per_100k"
+))
