@@ -1,0 +1,216 @@
+---
+title: "Epidemiological Surveillance Report"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  word_document:
+    toc: false
+params:
+  data: NULL
+  indicators: NULL
+  period: "weekly"
+  geo_level: "district"
+  title: "Epidemiological Surveillance Report"
+  location_name: "All locations"
+  logo_path: NULL
+  report_date: !r Sys.Date()
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 7,
+  fig.height = 4
+)
+library(dplyr)
+library(ggplot2)
+library(flextable)
+library(lubridate)
+
+data       <- params$data
+indicators <- params$indicators
+loc_name   <- params$location_name
+rep_date   <- params$report_date
+title      <- params$title
+
+date_min <- format(min(data$date), "%d/%m/%Y")
+date_max <- format(max(data$date), "%d/%m/%Y")
+week_num <- isoweek(max(data$date))
+year_num <- year(max(data$date))
+
+total_cases  <- sum(indicators$total_cases, na.rm = TRUE)
+total_deaths <- if ("total_deaths" %in% names(indicators)) sum(indicators$total_deaths, na.rm = TRUE) else NA
+```
+
+# `r title`
+
+**Location:** `r loc_name` | **Week:** `r week_num` – `r year_num` | **Period:** `r date_min` to `r date_max`
+
+---
+
+## 1. Executive Summary
+
+```{r summary-table}
+n_diseases  <- n_distinct(data$disease)
+n_locations <- n_distinct(data$location)
+
+summary_df <- data.frame(
+  Indicator = c(
+    "Reporting period",
+    "Diseases under surveillance",
+    "Geographic units",
+    "Total cases reported",
+    "Total deaths reported",
+    "Overall CFR (%)"
+  ),
+  Value = c(
+    paste0(date_min, " to ", date_max),
+    as.character(n_diseases),
+    as.character(n_locations),
+    as.character(total_cases),
+    if (!is.na(total_deaths)) as.character(total_deaths) else "N/A",
+    if (!is.na(total_deaths) && total_cases > 0)
+      paste0(round(total_deaths / total_cases * 100, 1), "%")
+    else "N/A"
+  )
+)
+
+flextable(summary_df) |>
+  set_header_labels(Indicator = "Indicator", Value = "Value") |>
+  bold(part = "header") |>
+  bg(part = "header", bg = "#2166ac") |>
+  color(part = "header", color = "white") |>
+  autofit() |>
+  border_outer() |>
+  border_inner_h()
+```
+
+---
+
+## 2. Case Summary by Disease
+
+```{r disease-table}
+disease_summary <- indicators |>
+  group_by(disease) |>
+  summarise(
+    Total_Cases  = sum(total_cases, na.rm = TRUE),
+    Total_Deaths = if ("total_deaths" %in% names(indicators))
+                     sum(total_deaths, na.rm = TRUE) else NA_real_,
+    CFR_pct      = if (!is.na(Total_Deaths) && Total_Cases > 0)
+                     round(Total_Deaths / Total_Cases * 100, 1) else NA_real_,
+    .groups = "drop"
+  ) |>
+  arrange(desc(Total_Cases))
+
+names(disease_summary) <- c("Disease", "Total Cases", "Total Deaths", "CFR (%)")
+
+flextable(disease_summary) |>
+  bold(part = "header") |>
+  bg(part = "header", bg = "#2166ac") |>
+  color(part = "header", color = "white") |>
+  bg(i = seq(2, nrow(disease_summary), by = 2), bg = "#f0f4f8") |>
+  autofit() |>
+  border_outer() |>
+  border_inner_h()
+```
+
+---
+
+## 3. Epidemic Curves
+
+```{r epi-curves, fig.cap="Weekly epidemic curves by disease"}
+plot_data <- data |>
+  mutate(week_date = floor_date(date, unit = "week")) |>
+  group_by(week_date, disease) |>
+  summarise(cases = sum(cases, na.rm = TRUE), .groups = "drop")
+
+ggplot(plot_data, aes(x = week_date, y = cases)) +
+  geom_col(fill = "#2166ac", color = "white", width = 6) +
+  facet_wrap(~ disease, scales = "free_y") +
+  scale_x_date(date_labels = "W%V\n%Y", date_breaks = "1 week") +
+  labs(
+    title    = paste0("Epidemic Curves — Week ", week_num, ", ", year_num),
+    subtitle = loc_name,
+    x        = "Epidemiological Week",
+    y        = "Number of Cases"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(color = "grey40"),
+    strip.text    = element_text(face = "bold"),
+    axis.text.x   = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  )
+```
+
+---
+
+## 4. Weekly Indicators
+
+```{r indicators-table}
+ind_display <- indicators |>
+  select(
+    period_label, disease, location, total_cases,
+    dplyr::any_of(c("incidence_per_100k", "total_deaths", "cfr_pct"))
+  ) |>
+  arrange(period_label, disease, location)
+
+col_labels <- c(
+  period_label       = "Week",
+  disease            = "Disease",
+  location           = "Location",
+  total_cases        = "Cases",
+  incidence_per_100k = "Incidence(/100k)",
+  total_deaths       = "Deaths",
+  cfr_pct            = "CFR (%)"
+)
+
+flextable(ind_display) |>
+  set_header_labels(values = col_labels[names(col_labels) %in% names(ind_display)]) |>
+  bold(part = "header") |>
+  bg(part = "header", bg = "#2166ac") |>
+  color(part = "header", color = "white") |>
+  bg(i = seq(2, nrow(ind_display), by = 2), bg = "#f0f4f8") |>
+  autofit() |>
+  border_outer() |>
+  border_inner_h()
+```
+
+---
+
+## 5. Alerts
+
+```{r alerts}
+if ("cfr_pct" %in% names(indicators)) {
+  alerts <- indicators |>
+    filter(!is.na(cfr_pct) & cfr_pct > 1) |>
+    select(disease, location, period_label, cfr_pct) |>
+    arrange(desc(cfr_pct))
+
+  if (nrow(alerts) > 0) {
+    cat("**ALERT — High Case Fatality Rate detected:**\n\n")
+    for (i in seq_len(nrow(alerts))) {
+      cat(paste0("- **", alerts$disease[i], "** in ", alerts$location[i],
+                 " (", alerts$period_label[i], "): CFR = ",
+                 alerts$cfr_pct[i], "%\n"))
+    }
+  } else {
+    cat("No CFR alerts this week.\n")
+  }
+}
+```
+
+---
+
+## 6. Recommendations
+
+- Continue routine surveillance for all notifiable diseases.
+- Investigate any clusters exceeding alert thresholds.
+- Ensure timely reporting from all health facilities.
+- Share this bulletin with district health teams and partners.
+
+---
+
+*Report generated automatically by **epiforge** v0.1.0 on `r format(Sys.Date(), "%d %B %Y")`.*
