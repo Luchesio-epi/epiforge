@@ -31,7 +31,6 @@ library(lubridate)
 data       <- params$data
 indicators <- params$indicators
 loc_name   <- params$location_name
-rep_date   <- params$report_date
 title      <- params$title
 
 date_min <- format(min(data$date), "%d/%m/%Y")
@@ -41,43 +40,56 @@ year_num <- year(max(data$date))
 
 total_cases  <- sum(indicators$total_cases, na.rm = TRUE)
 total_deaths <- if ("total_deaths" %in% names(indicators)) sum(indicators$total_deaths, na.rm = TRUE) else NA
+
+# Seuils CFR réalistes par maladie
+cfr_thresholds <- c(
+  "Méningite"  = 10,
+  "Meningitis" = 10,
+  "Choléra"    = 5,
+  "Cholera"    = 5,
+  "Paludisme"  = 2,
+  "Malaria"    = 2,
+  "Rougeole"   = 3,
+  "Measles"    = 3,
+  "default"    = 2
+)
 ```
 
 # `r title`
 
-**Location:** `r loc_name` | **Week:** `r week_num` – `r year_num` | **Period:** `r date_min` to `r date_max`
+**Location :** `r loc_name` | **Semaine :** `r week_num` – `r year_num` | **Période :** `r date_min` au `r date_max`
 
 ---
 
-## 1. Executive Summary
+## 1. Résumé exécutif
 
 ```{r summary-table}
 n_diseases  <- n_distinct(data$disease)
 n_locations <- n_distinct(data$location)
 
 summary_df <- data.frame(
-  Indicator = c(
-    "Reporting period",
-    "Diseases under surveillance",
-    "Geographic units",
-    "Total cases reported",
-    "Total deaths reported",
-    "Overall CFR (%)"
+  Indicateur = c(
+    "Période couverte",
+    "Maladies sous surveillance",
+    "Zones géographiques",
+    "Total cas rapportés",
+    "Total décès rapportés",
+    "Létalité globale (%)"
   ),
-  Value = c(
-    paste0(date_min, " to ", date_max),
+  Valeur = c(
+    paste0(date_min, " au ", date_max),
     as.character(n_diseases),
     as.character(n_locations),
     as.character(total_cases),
-    if (!is.na(total_deaths)) as.character(total_deaths) else "N/A",
+    if (!is.na(total_deaths)) as.character(total_deaths) else "N/D",
     if (!is.na(total_deaths) && total_cases > 0)
       paste0(round(total_deaths / total_cases * 100, 1), "%")
-    else "N/A"
+    else "N/D"
   )
 )
 
 flextable(summary_df) |>
-  set_header_labels(Indicator = "Indicator", Value = "Value") |>
+  set_header_labels(Indicateur = "Indicateur", Valeur = "Valeur") |>
   bold(part = "header") |>
   bg(part = "header", bg = "#2166ac") |>
   color(part = "header", color = "white") |>
@@ -88,7 +100,7 @@ flextable(summary_df) |>
 
 ---
 
-## 2. Case Summary by Disease
+## 2. Cas par maladie
 
 ```{r disease-table}
 disease_summary <- indicators |>
@@ -103,7 +115,7 @@ disease_summary <- indicators |>
   ) |>
   arrange(desc(Total_Cases))
 
-names(disease_summary) <- c("Disease", "Total Cases", "Total Deaths", "CFR (%)")
+names(disease_summary) <- c("Maladie", "Total Cas", "Total Décès", "Létalité (%)")
 
 flextable(disease_summary) |>
   bold(part = "header") |>
@@ -117,9 +129,9 @@ flextable(disease_summary) |>
 
 ---
 
-## 3. Epidemic Curves
+## 3. Courbes épidémiques
 
-```{r epi-curves, fig.cap="Weekly epidemic curves by disease"}
+```{r epi-curves, fig.cap="Courbes épidémiques hebdomadaires par maladie"}
 plot_data <- data |>
   mutate(week_date = floor_date(date, unit = "week")) |>
   group_by(week_date, disease) |>
@@ -128,12 +140,12 @@ plot_data <- data |>
 ggplot(plot_data, aes(x = week_date, y = cases)) +
   geom_col(fill = "#2166ac", color = "white", width = 6) +
   facet_wrap(~ disease, scales = "free_y") +
-  scale_x_date(date_labels = "W%V\n%Y", date_breaks = "1 week") +
+  scale_x_date(date_labels = "S%V\n%Y", date_breaks = "2 weeks") +
   labs(
-    title    = paste0("Epidemic Curves — Week ", week_num, ", ", year_num),
+    title    = paste0("Courbes épidémiques — Semaine ", week_num, ", ", year_num),
     subtitle = loc_name,
-    x        = "Epidemiological Week",
-    y        = "Number of Cases"
+    x        = "Semaine épidémiologique",
+    y        = "Nombre de cas"
   ) +
   theme_minimal(base_size = 11) +
   theme(
@@ -147,7 +159,7 @@ ggplot(plot_data, aes(x = week_date, y = cases)) +
 
 ---
 
-## 4. Weekly Indicators
+## 4. Indicateurs hebdomadaires
 
 ```{r indicators-table}
 ind_display <- indicators |>
@@ -158,13 +170,13 @@ ind_display <- indicators |>
   arrange(period_label, disease, location)
 
 col_labels <- c(
-  period_label       = "Week",
-  disease            = "Disease",
-  location           = "Location",
-  total_cases        = "Cases",
+  period_label       = "Semaine",
+  disease            = "Maladie",
+  location           = "Zone",
+  total_cases        = "Cas",
   incidence_per_100k = "Incidence(/100k)",
-  total_deaths       = "Deaths",
-  cfr_pct            = "CFR (%)"
+  total_deaths       = "Décès",
+  cfr_pct            = "Létalité (%)"
 )
 
 flextable(ind_display) |>
@@ -180,37 +192,70 @@ flextable(ind_display) |>
 
 ---
 
-## 5. Alerts
+## 5. Alertes épidémiologiques
 
 ```{r alerts}
 if ("cfr_pct" %in% names(indicators)) {
+
+  # Appliquer seuils par maladie
   alerts <- indicators |>
-    filter(!is.na(cfr_pct) & cfr_pct > 1) |>
-    select(disease, location, period_label, cfr_pct) |>
-    arrange(desc(cfr_pct))
+    filter(!is.na(cfr_pct)) |>
+    rowwise() |>
+    mutate(
+      threshold = ifelse(disease %in% names(cfr_thresholds),
+                         cfr_thresholds[disease],
+                         cfr_thresholds["default"])
+    ) |>
+    ungroup() |>
+    filter(cfr_pct > threshold) |>
+    group_by(disease, location) |>
+    summarise(
+      semaines     = n(),
+      cfr_max      = max(cfr_pct, na.rm = TRUE),
+      cfr_moy      = round(mean(cfr_pct, na.rm = TRUE), 1),
+      cas_total    = sum(total_cases, na.rm = TRUE),
+      deces_total  = sum(total_deaths, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    arrange(desc(cfr_max))
 
   if (nrow(alerts) > 0) {
-    cat("**ALERT — High Case Fatality Rate detected:**\n\n")
-    for (i in seq_len(nrow(alerts))) {
-      cat(paste0("- **", alerts$disease[i], "** in ", alerts$location[i],
-                 " (", alerts$period_label[i], "): CFR = ",
-                 alerts$cfr_pct[i], "%\n"))
-    }
+    alert_display <- alerts |>
+      rename(
+        Maladie          = disease,
+        Zone             = location,
+        `Semaines en alerte` = semaines,
+        `CFR max (%)`    = cfr_max,
+        `CFR moyen (%)`  = cfr_moy,
+        `Total cas`      = cas_total,
+        `Total décès`    = deces_total
+      )
+
+    flextable(alert_display) |>
+      bold(part = "header") |>
+      bg(part = "header", bg = "#d73027") |>
+      color(part = "header", color = "white") |>
+      bg(part = "body", bg = "#fff5f0") |>
+      bold(j = "CFR max (%)", part = "body") |>
+      autofit() |>
+      border_outer() |>
+      border_inner_h()
   } else {
-    cat("No CFR alerts this week.\n")
+    cat("Aucune alerte cette semaine. Toutes les maladies sont dans les seuils acceptables.")
   }
 }
 ```
 
 ---
 
-## 6. Recommendations
+## 6. Recommandations
 
-- Continue routine surveillance for all notifiable diseases.
-- Investigate any clusters exceeding alert thresholds.
-- Ensure timely reporting from all health facilities.
-- Share this bulletin with district health teams and partners.
+- Poursuivre la surveillance de routine pour toutes les maladies à déclaration obligatoire.
+- Investiguer immédiatement tout cluster dépassant les seuils d'alerte.
+- Renforcer la notification des cas dans les formations sanitaires sous-déclarantes.
+- Partager ce bulletin avec les équipes de santé de district et les partenaires.
+- Mobiliser les ressources pour la riposte contre les maladies en alerte.
 
 ---
 
-*Report generated automatically by **epiforge** v0.1.0 on `r format(Sys.Date(), "%d %B %Y")`.*
+*Bulletin généré automatiquement par **epiforge** v0.1.0 le `r format(Sys.Date(), "%d %B %Y")`.*
